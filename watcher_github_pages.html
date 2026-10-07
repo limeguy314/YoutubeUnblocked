@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watcher</title>
+<style>
+:root{--bg:#12151c;--panel:#1b1f2a;--line:#2b3140;--text:#e8e4da;--mute:#8d93a3;--acc:#4fd1b5;--err:#ff7a6b}
+@media (prefers-color-scheme:light){:root{--bg:#f1efe9;--panel:#fff;--line:#d9d5ca;--text:#1d2029;--mute:#667;--acc:#0b8f78;--err:#c43b2b}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.45 "Iowan Old Style","Palatino Linotype",Georgia,serif;display:flex;flex-direction:column}
+header{display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap}
+h1{font-size:20px;margin:0 8px 0 0;letter-spacing:.02em;font-weight:700}
+form{display:flex;flex:1;min-width:220px;gap:8px}
+input,select,button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+input[type=search]{flex:1;min-width:0}
+button{cursor:pointer}
+button.go{background:var(--acc);border-color:var(--acc);color:#07211c;font-weight:700}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
+#stage{padding:16px;overflow:auto}
+.frame{aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden;display:grid;place-items:center;color:var(--mute)}
+.frame iframe{width:100%;height:100%;border:0}
+#title{font-size:20px;margin:12px 0 2px}
+#meta{color:var(--mute);margin:0}
+.opts{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center;color:var(--mute);font-size:13px}
+aside{border-left:1px solid var(--line);overflow:auto;padding:12px}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button[aria-pressed=true]{border-color:var(--acc);color:var(--acc)}
+.item{display:grid;grid-template-columns:140px 1fr;gap:10px;padding:6px;border-radius:8px;cursor:pointer;width:100%;text-align:left;background:none;border:0;margin-bottom:4px}
+.item:hover,.item.on{background:var(--panel)}
+.item.on{box-shadow:inset 3px 0 var(--acc)}
+.th{position:relative;aspect-ratio:16/9;background:var(--line);border-radius:5px;overflow:hidden}
+.th img{width:100%;height:100%;object-fit:cover;display:block}
+.th b{position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.8);color:#fff;font:600 11px system-ui;padding:1px 5px;border-radius:3px}
+.it{font-size:14px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.im{font-size:12px;color:var(--mute)}
+#status{padding:8px 4px;color:var(--mute);font-size:13px}
+#status.err{color:var(--err)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;max-width:520px;width:92%}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+textarea{width:100%;height:150px;font:13px ui-monospace,monospace;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px}
+#comments{margin-top:18px;max-width:760px}
+#comments h3{margin:0 0 8px;font-size:16px}
+.c{padding:10px 0;border-top:1px solid var(--line)}
+.c p{margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.c .rl{margin-left:22px}
+.c .rp,#more{font-size:13px;padding:4px 10px}
+@media (max-width:860px){main{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{border-left:0;border-top:1px solid var(--line)}}
+@media (prefers-reduced-motion:no-preference){.item{transition:background .15s}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Watcher</h1>
+  <form id="f">
+    <input type="search" id="q" placeholder="Search videos" aria-label="Search videos" autofocus>
+    <button class="go">Search</button>
+  </form>
+  <button id="cfg" type="button">Instances</button>
+</header>
+<main>
+  <section id="stage">
+    <div class="frame" id="frame">Search for a video, then pick one to play.</div>
+    <h2 id="title"></h2>
+    <p id="meta"></p>
+    <div class="opts">
+      <label>Player
+        <select id="src">
+          <option value="yt">YouTube (no-cookie embed)</option>
+          <option value="direct">Direct stream (temporary download)</option>
+          <option value="inv">Invidious embed</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="auto" checked> Autoplay</label>
+      <select id="qual" hidden aria-label="Quality"></select>
+    </div>
+  <div id="comments"></div>
+  </section>
+  <aside>
+    <div class="tabs">
+      <button id="tR" aria-pressed="true">Results</button>
+      <button id="tH" aria-pressed="false">History</button>
+    </div>
+    <div id="status"></div>
+    <div id="list"></div>
+  </aside>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <p>Invidious instances, one per line. They are tried in order until one answers the search API.</p>
+    <textarea id="inst"></textarea>
+    <p style="display:flex;gap:8px;justify-content:flex-end;margin:10px 0 0">
+      <button type="button" id="reset">Reset defaults</button>
+      <button class="go" id="save" value="ok">Save</button>
+    </p>
+  </form>
+</dialog>
+
+<script>
+const DEFAULTS=["https://inv.nadeko.net","https://yewtu.be","https://invidious.nerdvpn.de","https://invidious.privacyredirect.com","https://inv.tux.pizza"];
+const $=id=>document.getElementById(id);
+const store={
+  get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
+};
+let instances=store.get("instances",DEFAULTS), working=null, results=[], history=store.get("history",[]), current=null, tab="R";
+
+const fmt=s=>{s=+s||0;const h=Math.floor(s/3600),m=Math.floor(s%3600/60),r=s%60;return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(r).padStart(2,"0")};
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const status=(t,err)=>{$("status").textContent=t;$("status").className=err?"err":""};
+
+let upstream=null, discovered=null;
+const timed=(url,ms)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);return fetch(url,{signal:c.signal}).finally(()=>clearTimeout(t))};
+
+// Ask the public Invidious directory for instances that allow browser API calls.
+async function discover(){
+  if(discovered) return discovered;
+  try{
+    const j=await (await timed("https://api.invidious.io/instances.json?sort_by=health",6000)).json();
+    discovered=j.filter(([,i])=>i.type==="https"&&i.api===true&&i.cors===true).map(([,i])=>i.uri.replace(/\/$/,""));
+  }catch{discovered=[]}
+  return discovered;
+}
+
+// Query instances 4 at a time; the first valid answer wins.
+async function race(list,path,ok=Array.isArray){
+  for(let i=0;i<list.length;i+=4){
+    try{
+      return await Promise.any(list.slice(i,i+4).map(async b=>{
+        const r=await timed(b+path,7000);
+        if(!r.ok) throw 0;
+        const j=await r.json();
+        if(!ok(j)) throw 0;
+        return {b,j};
+      }));
+    }catch{}
+  }
+  return null;
+}
+
+async function api(path,ok){
+  let hit=null;
+  if(working) hit=await race([working],path,ok);
+  if(!hit){status("Finding a working instance…");hit=await race(instances.filter(i=>i!==working),path,ok)}
+  if(!hit){status("Checking the public instance list…");const tried=new Set(instances);hit=await race((await discover()).filter(i=>!tried.has(i)),path,ok)}
+  if(!hit) throw new Error("No instance answered. Your network may block them. Open Instances and add one that works.");
+  working=upstream=hit.b;
+  return hit.j;
+}
+
+function thumb(v){
+  return `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`;
+}
+
+async function search(q){
+  tab="R";sync();$("list").innerHTML="";status("Searching…");
+  try{
+    const data=await api("/api/v1/search?type=video&q="+encodeURIComponent(q));
+    results=data.filter(v=>v.type==="video").map(v=>({id:v.videoId,title:v.title,author:v.author,len:v.lengthSeconds,views:v.viewCount,pub:v.publishedText,img:thumb(v)}));
+    status(results.length?`${results.length} results via ${new URL(upstream||working).host}`:"No results. Try different words.");
+    render();
+  }catch(e){status(e.message,true)}
+}
+
+function render(){
+  const items=tab==="R"?results:history;
+  if(tab==="H"&&!items.length) status("Nothing watched yet.");
+  $("list").innerHTML=items.map(v=>`
+    <button class="item${current&&current.id===v.id?" on":""}" data-id="${esc(v.id)}">
+      <span class="th"><img loading="lazy" referrerpolicy="no-referrer" src="${esc(v.img)}" alt=""><b>${fmt(v.len)}</b></span>
+      <span><span class="it">${esc(v.title)}</span><br><span class="im">${esc(v.author)}${v.views?" · "+Number(v.views).toLocaleString()+" views":""}${v.pub?" · "+esc(v.pub):""}</span></span>
+    </button>`).join("");
+}
+
+let playToken=0, moreCont=null;
+function showEmbed(v,mode,a){
+  cleanupVideo();
+  const src=mode==="inv"&&(upstream||working)
+    ? `${upstream||working}/embed/${v.id}?autoplay=${a}`
+    : `https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.id)}?autoplay=${a}&rel=0&playsinline=1&modestbranding=1`;
+  $("qual").hidden=true;
+  $("frame").innerHTML=`<iframe src="${esc(src)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="${esc(v.title)}"></iframe>`;
+  status(mode==="inv"?"Playing through Invidious.":"Playing through YouTube.");
+}
+/*
+ * Video lifecycle:
+ * - The media URL is never stored in localStorage/sessionStorage/IndexedDB.
+ * - The stream is fetched with cache:"no-store" and converted to an in-memory Blob.
+ * - Only a temporary blob: URL is assigned to <video>.
+ * - Switching videos, changing quality, leaving the page, or closing the tab
+ *   aborts the download, removes the video source, and revokes the object URL.
+ *
+ * Note: a webpage cannot forcibly erase the browser's global HTTP cache or
+ * storage belonging to other sites. This app never intentionally puts the
+ * video into persistent storage and asks the browser not to cache its fetch.
+ */
+let activeVideoURL=null, activeVideoController=null, activeVideoBlob=null;
+
+function cleanupVideo(){
+  if(activeVideoController){
+    try{activeVideoController.abort()}catch{}
+    activeVideoController=null;
+  }
+  const el=$("frame").querySelector("video");
+  if(el){
+    try{el.pause()}catch{}
+    el.removeAttribute("src");
+    try{el.load()}catch{}
+  }
+  if(activeVideoURL){
+    try{URL.revokeObjectURL(activeVideoURL)}catch{}
+    activeVideoURL=null;
+  }
+  activeVideoBlob=null;
+  // Remove only an app-owned Cache Storage bucket, if one ever exists.
+  try{if("caches" in window)caches.delete("watcher-video-cache").catch(()=>{})}catch{}
+}
+
+async function fetchVideoBlob(url,token){
+  cleanupVideo();
+  const controller=new AbortController();
+  activeVideoController=controller;
+  // Cache-busting is deliberately limited to this temporary network request.
+  const u=url+(url.includes("?")?"&":"?")+"_watcher="+Date.now()+"_"+Math.random().toString(36).slice(2);
+  const r=await fetch(u,{
+    method:"GET",
+    mode:"cors",
+    credentials:"omit",
+    cache:"no-store",
+    redirect:"follow",
+    signal:controller.signal,
+    headers:{"Cache-Control":"no-cache","Pragma":"no-cache"}
+  });
+  if(!r.ok) throw new Error("Video server returned HTTP "+r.status);
+  if(token!==playToken) throw new DOMException("Stale video","AbortError");
+  const blob=await r.blob();
+  if(token!==playToken) throw new DOMException("Stale video","AbortError");
+  activeVideoController=null;
+  activeVideoBlob=blob;
+  return blob;
+}
+
+async function showVideo(v,streams,i,a,at,token=playToken){
+  const old=$("frame").querySelector("video");
+  const resume=at ?? (old ? old.currentTime : 0);
+  status("Downloading video into temporary memory…");
+  $("frame").innerHTML='<span>Fetching video…</span>';
+  try{
+    const blob=await fetchVideoBlob(streams[i].url,token);
+    if(token!==playToken){cleanupVideo();return}
+    activeVideoURL=URL.createObjectURL(blob);
+    const el=document.createElement("video");
+    el.controls=true;el.playsInline=true;el.autoplay=!!a;
+    el.preload="auto";
+    el.style.cssText="width:100%;height:100%;background:#000";
+    el.src=activeVideoURL;
+    if(resume>0) el.addEventListener("loadedmetadata",()=>{try{el.currentTime=resume}catch{}},{once:true});
+    el.onerror=()=>{cleanupVideo();status("The downloaded video could not be decoded.",true)};
+    el.onended=()=>{status("Video finished.")};
+    $("frame").replaceChildren(el);
+    status("Playing temporary in-memory copy.");
+    if(a){try{await el.play()}catch{}}
+  }catch(e){
+    cleanupVideo();
+    if(token!==playToken) return;
+    if(e?.name==="AbortError") return;
+    throw e;
+  }
+}
+
+async function play(v){
+  cleanupVideo();
+  current=v;const token=++playToken;
+  const a=$("auto").checked?1:0;
+  $("title").textContent=v.title;
+  $("meta").textContent=[v.author,v.pub].filter(Boolean).join(" · ");
+  history=[v,...history.filter(h=>h.id!==v.id)].slice(0,50);
+  store.set("history",history);
+  render();
+  $("qual").hidden=true;
+  loadComments(v,token);
+  // GitHub Pages serves this page over HTTPS, so the YouTube iframe can be used
+  // directly. Do not force the player to Direct mode just because the source
+  // file was once opened locally; GitHub Pages is the intended deployment.
+  let mode=$("src").value;
+  if(mode==="direct"){
+    $("frame").textContent="Loading video…";
+    try{
+      const j=await api(`/api/v1/videos/${v.id}?local=true&fields=formatStreams`,x=>x&&Array.isArray(x.formatStreams)&&x.formatStreams.length);
+      if(token!==playToken) return;
+      const base=working;
+      const streams=j.formatStreams.map(s=>({label:s.qualityLabel||s.quality||"auto",url:s.url.startsWith("/")?base+s.url:s.url}))
+        .sort((x,y)=>parseInt(y.label)-parseInt(x.label));
+      const q=$("qual");
+      q.innerHTML=streams.map((s,i)=>`<option value="${i}">${esc(s.label)}</option>`).join("");
+      q.hidden=false;
+      q.onchange=async()=>{
+        const el=$("frame").querySelector("video");
+        const at=el?el.currentTime:0;
+        const wasPlaying=el?!el.paused:true;
+        try{await showVideo(v,streams,+q.value,wasPlaying,at,token)}
+        catch(e){if(token===playToken)status("Could not download that quality.",true)}
+      };
+      await showVideo(v,streams,0,a,0,token);
+      return;
+    }catch(e){
+      if(token!==playToken)return;
+      status("Direct video download unavailable, using the Invidious embed instead.",true);
+      mode="inv";
+    }
+  }
+  showEmbed(v,mode,a);
+}
+
+const cmt=c=>`<div class="c"><b>${esc(c.author)}</b> <span class="im">${esc(c.publishedText||"")}${c.likeCount?" · "+Number(c.likeCount).toLocaleString()+" likes":""}${c.isPinned?" · pinned":""}</span><p>${esc(c.content)}</p>${c.replies&&c.replies.continuation?`<button class="rp" data-k="${esc(c.replies.continuation)}">${c.replies.replyCount||""} replies</button><div class="rl"></div>`:""}</div>`;
+async function fetchComments(v,cont){
+  return api(`/api/v1/comments/${v.id}?sort_by=top`+(cont?`&continuation=${encodeURIComponent(cont)}`:""),x=>x&&Array.isArray(x.comments));
+}
+async function loadComments(v,token,cont){
+  const box=$("comments");
+  if(!cont) box.innerHTML='<h3>Comments</h3><div id="cl"></div><p class="im" id="cs">Loading comments…</p>';
+  try{
+    const j=await fetchComments(v,cont);
+    if(token!==playToken) return;
+    $("cl").insertAdjacentHTML("beforeend",j.comments.map(cmt).join(""));
+    moreCont=j.continuation||null;
+    $("cs").innerHTML=j.comments.length||cont?(moreCont?'<button id="more">Load more comments</button>':""):"No comments, or comments are turned off.";
+  }catch{ if(token===playToken) $("cs").textContent="Comments could not be loaded from this instance." }
+}
+$("comments").onclick=async e=>{
+  const t=e.target;
+  if(t.id==="more"){t.disabled=true;t.textContent="Loading…";loadComments(current,playToken,moreCont)}
+  else if(t.classList.contains("rp")){
+    const box=t.nextElementSibling;t.disabled=true;
+    try{const j=await fetchComments(current,t.dataset.k);box.innerHTML=j.comments.map(cmt).join("");t.remove()}
+    catch{t.disabled=false;t.textContent="Retry replies"}
+  }
+};
+
+function sync(){
+  $("tR").setAttribute("aria-pressed",tab==="R");
+  $("tH").setAttribute("aria-pressed",tab==="H");
+}
+
+$("f").onsubmit=e=>{e.preventDefault();const q=$("q").value.trim();if(q)search(q)};
+$("list").onclick=e=>{
+  const b=e.target.closest(".item");if(!b)return;
+  const pool=tab==="R"?results:history;
+  const v=pool.find(x=>x.id===b.dataset.id);if(v)play(v);
+};
+$("tR").onclick=()=>{tab="R";sync();status(results.length?"":"");render()};
+$("tH").onclick=()=>{tab="H";sync();status("");render()};
+if(location.protocol==="file:") status("Tip: publish this file with GitHub Pages for the YouTube player.");
+else if(location.protocol==="https:" && location.hostname.endsWith("github.io")) status("GitHub Pages mode: YouTube playback is ready.");
+$("src").onchange=()=>current&&play(current);
+
+// Best-effort lifecycle cleanup. beforeunload/pagehide cannot guarantee asynchronous
+// browser internals are wiped, but all resources owned by this page are released.
+window.addEventListener("pagehide",cleanupVideo,{capture:true});
+window.addEventListener("beforeunload",cleanupVideo,{capture:true});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&document.wasDiscarded)cleanupVideo()});
+
+$("cfg").onclick=()=>{$("inst").value=instances.join("\n");$("dlg").showModal()};
+$("reset").onclick=()=>{$("inst").value=DEFAULTS.join("\n")};
+$("dlg").addEventListener("close",()=>{
+  if($("dlg").returnValue!=="ok")return;
+  const l=$("inst").value.split("\n").map(s=>s.trim()).filter(s=>/^https?:\/\//.test(s));
+  instances=l.length?l:DEFAULTS;working=null;store.set("instances",instances);
+});
+</script>
+</body>
+</html>
